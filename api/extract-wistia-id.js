@@ -1,61 +1,29 @@
 const https = require('https');
-const http = require('http');
-const tls = require('tls');
-const { URL } = require('url');
 
-// Create browser-like cipher order to bypass TLS fingerprinting
-const defaultCiphers = tls.DEFAULT_CIPHERS.split(':');
-const browserCiphers = [
-    // Reorder to match Chrome's cipher preference
-    defaultCiphers[2], // TLS_AES_128_GCM_SHA256 (Chrome's #1 choice)
-    defaultCiphers[0], // TLS_AES_256_GCM_SHA384 (Chrome's #2 choice)  
-    defaultCiphers[1], // TLS_CHACHA20_POLY1305_SHA256 (Chrome's #3 choice)
-    ...defaultCiphers.slice(3) // Rest in original order
-].join(':');
-
-// Helper function to make HTTP requests with browser-like TLS fingerprint
-function makeRequest(url, options = {}) {
+// Helper function to make requests via Web Unlocker API
+async function fetchWithWebUnlocker(targetUrl) {
   return new Promise((resolve, reject) => {
-    const urlObj = new URL(url);
-    const isHttps = urlObj.protocol === 'https:';
-    const client = isHttps ? https : http;
+    const apiKey = process.env.BRIGHT_DATA_API_KEY || '7ed816c201449cfea700fa9d279b7c138...'; // Use your full API key
     
-    const requestOptions = {
-      hostname: urlObj.hostname,
-      port: urlObj.port || (isHttps ? 443 : 80),
-      path: urlObj.pathname + urlObj.search,
-      method: options.method || 'GET',
+    const options = {
+      hostname: 'api.brightdata.com',
+      port: 443,
+      path: '/request',
+      method: 'POST',
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-User': '?1',
-        'Cache-Control': 'max-age=0',
-        'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-        'sec-ch-ua-mobile': '?0',
-        'sec-ch-ua-platform': '"Windows"',
-        ...options.headers
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
       }
     };
 
-    // Apply browser-like cipher order for HTTPS requests
-    if (isHttps) {
-      requestOptions.ciphers = browserCiphers;
-      requestOptions.secureProtocol = 'TLSv1_2_method'; // Use TLS 1.2 like browsers
-    }
+    const postData = JSON.stringify({
+      url: targetUrl,
+      format: 'raw'
+    });
 
-    if (options.body) {
-      requestOptions.headers['Content-Type'] = 'application/x-www-form-urlencoded';
-      requestOptions.headers['Content-Length'] = Buffer.byteLength(options.body);
-    }
+    console.log('Making Web Unlocker API request to:', targetUrl);
 
-    const req = client.request(requestOptions, (res) => {
+    const req = https.request(options, (res) => {
       let data = '';
       
       res.on('data', (chunk) => {
@@ -63,16 +31,19 @@ function makeRequest(url, options = {}) {
       });
       
       res.on('end', () => {
-        resolve({
-          statusCode: res.statusCode,
-          headers: res.headers,
-          body: data,
-          url: res.url || url
-        });
+        if (res.statusCode === 200) {
+          resolve({
+            statusCode: 200,
+            body: data
+          });
+        } else {
+          reject(new Error(`API request failed with status ${res.statusCode}: ${data}`));
+        }
       });
     });
 
     req.on('error', (error) => {
+      console.error('Web Unlocker API error:', error);
       reject(error);
     });
 
@@ -81,36 +52,18 @@ function makeRequest(url, options = {}) {
       reject(new Error('Request timeout'));
     });
 
-    if (options.body) {
-      req.write(options.body);
-    }
-
+    req.write(postData);
     req.end();
   });
 }
 
-// Function to extract cookies from response headers
-function extractCookies(headers) {
-  const cookies = [];
-  const setCookieHeaders = headers['set-cookie'] || [];
-  
-  setCookieHeaders.forEach(cookie => {
-    const cookieParts = cookie.split(';')[0];
-    cookies.push(cookieParts);
-  });
-  
-  return cookies.join('; ');
-}
-
-// Function to extract authenticity token from HTML (matching Python version)
+// Function to extract authenticity token from HTML
 function extractAuthenticityToken(html) {
-  // Try input field first (most common for login forms)
   const inputMatch = html.match(/name="authenticity_token"[^>]*value="([^"]+)"/i);
   if (inputMatch) {
     return inputMatch[1];
   }
   
-  // Fallback to meta tag
   const metaMatch = html.match(/name="csrf-token"[^>]*content="([^"]+)"/i);
   if (metaMatch) {
     return metaMatch[1];
@@ -119,7 +72,7 @@ function extractAuthenticityToken(html) {
   return null;
 }
 
-// Function to extract Wistia ID from HTML (comprehensive patterns from Python version)
+// Function to extract Wistia ID from HTML
 function extractWistiaId(html) {
   // Pattern 1: Iframe src attribute
   const iframeMatches = html.matchAll(/src="[^"]*(?:wistia\.com\/embed\/(?:iframe|medias)\/|fast\.wistia\.net\/embed\/(?:iframe|medias)\/)([a-zA-Z0-9]{10})[^"]*"/g);
@@ -160,7 +113,6 @@ function extractWistiaId(html) {
   // Pattern 7: General Wistia ID pattern in any context
   const generalMatches = html.matchAll(/[^a-zA-Z0-9]([a-zA-Z0-9]{10})[^a-zA-Z0-9]/g);
   for (const match of generalMatches) {
-    // Check if this ID appears in a Wistia context
     const id = match[1];
     const contextRegex = new RegExp(`wistia[^a-zA-Z0-9]{0,50}${id}|${id}[^a-zA-Z0-9]{0,50}wistia`, 'i');
     if (contextRegex.test(html)) {
@@ -196,121 +148,30 @@ export default async function handler(req, res) {
     }
 
     console.log('Starting extraction process for URL:', url);
-    console.log('Using browser-like TLS fingerprint to bypass detection');
 
-    // Step 1: Get the login page to extract authenticity token and cookies
-    console.log('Fetching login page...');
-    const loginPageUrl = 'https://www.empowermentsuccess.com/login';
+    // For now, let's try to fetch the target page directly
+    // Web Unlocker should handle cookies and sessions automatically
+    console.log('Fetching target page via Web Unlocker API...');
     
-    let loginPageResponse;
-    try {
-      loginPageResponse = await makeRequest(loginPageUrl);
-    } catch (error) {
-      console.error('Error fetching login page:', error);
-      return res.status(500).json({ 
-        error: 'Failed to fetch login page', 
-        message: error.message,
-        success: false
-      });
-    }
-    
-    if (loginPageResponse.statusCode !== 200) {
-      console.error('Login page returned status:', loginPageResponse.statusCode);
-      return res.status(500).json({ 
-        error: `Failed to fetch login page: ${loginPageResponse.statusCode}`,
-        success: false
-      });
-    }
-
-    const cookies = extractCookies(loginPageResponse.headers);
-    const authToken = extractAuthenticityToken(loginPageResponse.body);
-    
-    console.log('Successfully extracted cookies and authenticity token');
-
-    // Step 2: Submit login credentials (matching Python version exactly)
-    console.log('Submitting login credentials...');
-    const loginData = new URLSearchParams({
-      'utf8': '✓',
-      'authenticity_token': authToken || '',
-      'member[email]': email,
-      'member[password]': password,
-      'member[remember_me]': '0',
-      'commit': 'Sign In'
-    }).toString();
-
-    let loginResponse;
-    try {
-      loginResponse = await makeRequest(loginPageUrl, {
-        method: 'POST',
-        headers: {
-          'Cookie': cookies,
-          'Referer': loginPageUrl,
-          'Origin': 'https://www.empowermentsuccess.com',
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: loginData
-      });
-    } catch (error) {
-      console.error('Error during login:', error);
-      return res.status(500).json({ 
-        error: 'Login request failed', 
-        message: error.message,
-        success: false
-      });
-    }
-
-    // Update cookies with login session
-    const sessionCookies = extractCookies(loginResponse.headers);
-    const allCookies = cookies + (sessionCookies ? '; ' + sessionCookies : '');
-
-    console.log('Login response status:', loginResponse.statusCode);
-
-    // Check for successful login (matching Python logic)
-    const loginSuccessful = loginResponse.statusCode >= 300 && loginResponse.statusCode < 400 || 
-                           (loginResponse.url && loginResponse.url !== loginPageUrl && !loginResponse.url.toLowerCase().includes('login')) ||
-                           (!loginResponse.body.includes('Sign in to your account') && !loginResponse.body.includes('Invalid email or password'));
-
-    if (!loginSuccessful) {
-      console.error('Login appears to have failed');
-      return res.status(401).json({ 
-        error: 'Login failed', 
-        message: 'Please check your credentials',
-        success: false
-      });
-    }
-
-    console.log('Login successful!');
-
-    // Step 3: Access the target page with authenticated session
-    console.log('Accessing target page with authenticated session...');
     let targetResponse;
     try {
-      targetResponse = await makeRequest(url, {
-        headers: {
-          'Cookie': allCookies,
-          'Referer': loginPageUrl
-        }
-      });
+      targetResponse = await fetchWithWebUnlocker(url);
     } catch (error) {
-      console.error('Error accessing target page:', error);
+      console.error('Error fetching page:', error);
+      
+      // If direct access fails, we might need to implement login flow
+      // For now, let's return a helpful message
       return res.status(500).json({ 
-        error: 'Failed to access target page', 
-        message: error.message,
+        error: 'Failed to fetch page via Web Unlocker', 
+        message: 'The page might require login. Manual login flow implementation needed.',
+        details: error.message,
         success: false
       });
     }
 
-    if (targetResponse.statusCode !== 200) {
-      console.error('Target page returned status:', targetResponse.statusCode);
-      return res.status(500).json({ 
-        error: `Failed to access target page: ${targetResponse.statusCode}`,
-        success: false
-      });
-    }
+    console.log('Successfully fetched page, searching for Wistia ID...');
 
-    console.log('Successfully accessed target page');
-
-    // Step 4: Extract Wistia ID from the page content
+    // Extract Wistia ID from the page content
     const wistiaId = extractWistiaId(targetResponse.body);
 
     if (wistiaId) {
@@ -322,9 +183,19 @@ export default async function handler(req, res) {
       });
     } else {
       console.log('No Wistia ID found in page content');
+      
+      // Check if login is required
+      if (targetResponse.body.includes('Sign in') || targetResponse.body.includes('login')) {
+        return res.status(200).json({ 
+          success: false, 
+          message: 'Page requires login. Manual login flow needed for protected content.',
+          wistiaId: null
+        });
+      }
+      
       return res.status(200).json({ 
         success: false, 
-        message: 'NO VIDEO',
+        message: 'NO VIDEO - No Wistia ID found on the page',
         wistiaId: null
       });
     }
