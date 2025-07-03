@@ -1,8 +1,19 @@
 const https = require('https');
 const http = require('http');
+const tls = require('tls');
 const { URL } = require('url');
 
-// Helper function to make HTTP requests with better error handling
+// Create browser-like cipher order to bypass TLS fingerprinting
+const defaultCiphers = tls.DEFAULT_CIPHERS.split(':');
+const browserCiphers = [
+    // Reorder to match Chrome's cipher preference
+    defaultCiphers[2], // TLS_AES_128_GCM_SHA256 (Chrome's #1 choice)
+    defaultCiphers[0], // TLS_AES_256_GCM_SHA384 (Chrome's #2 choice)  
+    defaultCiphers[1], // TLS_CHACHA20_POLY1305_SHA256 (Chrome's #3 choice)
+    ...defaultCiphers.slice(3) // Rest in original order
+].join(':');
+
+// Helper function to make HTTP requests with browser-like TLS fingerprint
 function makeRequest(url, options = {}) {
   return new Promise((resolve, reject) => {
     const urlObj = new URL(url);
@@ -15,8 +26,8 @@ function makeRequest(url, options = {}) {
       path: urlObj.pathname + urlObj.search,
       method: options.method || 'GET',
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
         'Accept-Language': 'en-US,en;q=0.9',
         'Accept-Encoding': 'gzip, deflate, br',
         'Connection': 'keep-alive',
@@ -24,10 +35,20 @@ function makeRequest(url, options = {}) {
         'Sec-Fetch-Dest': 'document',
         'Sec-Fetch-Mode': 'navigate',
         'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
         'Cache-Control': 'max-age=0',
+        'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
         ...options.headers
       }
     };
+
+    // Apply browser-like cipher order for HTTPS requests
+    if (isHttps) {
+      requestOptions.ciphers = browserCiphers;
+      requestOptions.secureProtocol = 'TLSv1_2_method'; // Use TLS 1.2 like browsers
+    }
 
     if (options.body) {
       requestOptions.headers['Content-Type'] = 'application/x-www-form-urlencoded';
@@ -55,7 +76,7 @@ function makeRequest(url, options = {}) {
       reject(error);
     });
 
-    req.setTimeout(15000, () => {
+    req.setTimeout(30000, () => {
       req.destroy();
       reject(new Error('Request timeout'));
     });
@@ -175,6 +196,7 @@ export default async function handler(req, res) {
     }
 
     console.log('Starting extraction process for URL:', url);
+    console.log('Using browser-like TLS fingerprint to bypass detection');
 
     // Step 1: Get the login page to extract authenticity token and cookies
     console.log('Fetching login page...');
@@ -203,7 +225,7 @@ export default async function handler(req, res) {
     const cookies = extractCookies(loginPageResponse.headers);
     const authToken = extractAuthenticityToken(loginPageResponse.body);
     
-    console.log('Extracted cookies and authenticity token');
+    console.log('Successfully extracted cookies and authenticity token');
 
     // Step 2: Submit login credentials (matching Python version exactly)
     console.log('Submitting login credentials...');
@@ -256,6 +278,8 @@ export default async function handler(req, res) {
         success: false
       });
     }
+
+    console.log('Login successful!');
 
     // Step 3: Access the target page with authenticated session
     console.log('Accessing target page with authenticated session...');
