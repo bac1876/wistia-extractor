@@ -103,7 +103,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { url, email, password } = req.body;
+    const { url, email, password } = req.body; 
 
     if (!url || !email || !password) {
       return res.status(400).json({ error: 'Missing required parameters: url, email, password' });
