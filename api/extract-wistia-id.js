@@ -3,27 +3,14 @@ const https = require('https');
 // Helper function to make requests via Web Unlocker API
 async function fetchWithWebUnlocker(targetUrl) {
   return new Promise((resolve, reject) => {
-    const apiKey = process.env.BRIGHT_DATA_API_KEY || '7ed816c201449cfea700fa9d279b7c138...'; // Use your full API key
+    const apiKey = process.env.BRIGHT_DATA_API_KEY || '7ed816c201449cfea700fa9d279b7c138...'; // Your API key
     
-    const options = {
-      hostname: 'api.brightdata.com',
-      port: 443,
-      path: '/request',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      }
-    };
-
-    const postData = JSON.stringify({
-      url: targetUrl,
-      format: 'raw'
-    });
-
+    // Construct the URL exactly as shown in the curl example
+    const apiUrl = `https://api.brightdata.com/request?key=${apiKey}&url=${encodeURIComponent(targetUrl)}&format=raw`;
+    
     console.log('Making Web Unlocker API request to:', targetUrl);
 
-    const req = https.request(options, (res) => {
+    https.get(apiUrl, (res) => {
       let data = '';
       
       res.on('data', (chunk) => {
@@ -40,36 +27,11 @@ async function fetchWithWebUnlocker(targetUrl) {
           reject(new Error(`API request failed with status ${res.statusCode}: ${data}`));
         }
       });
-    });
-
-    req.on('error', (error) => {
+    }).on('error', (error) => {
       console.error('Web Unlocker API error:', error);
       reject(error);
     });
-
-    req.setTimeout(30000, () => {
-      req.destroy();
-      reject(new Error('Request timeout'));
-    });
-
-    req.write(postData);
-    req.end();
   });
-}
-
-// Function to extract authenticity token from HTML
-function extractAuthenticityToken(html) {
-  const inputMatch = html.match(/name="authenticity_token"[^>]*value="([^"]+)"/i);
-  if (inputMatch) {
-    return inputMatch[1];
-  }
-  
-  const metaMatch = html.match(/name="csrf-token"[^>]*content="([^"]+)"/i);
-  if (metaMatch) {
-    return metaMatch[1];
-  }
-  
-  return null;
 }
 
 // Function to extract Wistia ID from HTML
@@ -150,7 +112,7 @@ export default async function handler(req, res) {
     console.log('Starting extraction process for URL:', url);
 
     // For now, let's try to fetch the target page directly
-    // Web Unlocker should handle cookies and sessions automatically
+    // Web Unlocker should handle some authentication automatically
     console.log('Fetching target page via Web Unlocker API...');
     
     let targetResponse;
@@ -158,13 +120,9 @@ export default async function handler(req, res) {
       targetResponse = await fetchWithWebUnlocker(url);
     } catch (error) {
       console.error('Error fetching page:', error);
-      
-      // If direct access fails, we might need to implement login flow
-      // For now, let's return a helpful message
       return res.status(500).json({ 
         error: 'Failed to fetch page via Web Unlocker', 
-        message: 'The page might require login. Manual login flow implementation needed.',
-        details: error.message,
+        message: error.message,
         success: false
       });
     }
