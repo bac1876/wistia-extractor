@@ -1,5 +1,34 @@
-// Simple version that just extracts Wistia ID from a URL
-// This skips the proxy/login complexity for now
+// Use CommonJS syntax for better Vercel compatibility
+const axios = require('axios');
+const { HttpsProxyAgent } = require('https-proxy-agent');
+
+// Helper function to make requests via Web Unlocker Proxy
+async function fetchWithWebUnlocker(targetUrl) {
+  // Web Unlocker proxy configuration
+  const proxy = 'http://brd-customer-hl_b332c2c3-zone-web_unlocker1:jcp31umu6sd4@brd.superproxy.io:33335';
+  
+  try {
+    console.log('Making request via Web Unlocker proxy to:', targetUrl);
+    
+    const agent = new HttpsProxyAgent(proxy);
+    
+    const response = await axios.get(targetUrl, {
+      httpsAgent: agent,
+      timeout: 30000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+    });
+    
+    return {
+      statusCode: response.status,
+      body: response.data
+    };
+  } catch (error) {
+    console.error('Web Unlocker proxy error:', error.message);
+    throw error;
+  }
+}
 
 // Function to extract Wistia ID from HTML
 function extractWistiaId(html) {
@@ -52,26 +81,9 @@ function extractWistiaId(html) {
   return null;
 }
 
-// Function to extract Wistia ID directly from URL
-function extractWistiaIdFromUrl(url) {
-  // Direct Wistia embed URLs
-  const urlMatch = url.match(/(?:wistia\.com\/embed\/(?:iframe|medias)\/|fast\.wistia\.net\/embed\/(?:iframe|medias)\/)([a-zA-Z0-9]{10})/);
-  if (urlMatch) {
-    return urlMatch[1];
-  }
-  
-  // Wistia URLs with video ID in path
-  const pathMatch = url.match(/(?:wistia\.com|wistia\.net)\/.*\/([a-zA-Z0-9]{10})(?:\?|$|#)/);
-  if (pathMatch) {
-    return pathMatch[1];
-  }
-  
-  return null;
-}
-
-// Main handler function
-export default async function handler(req, res) {
-  console.log('Simple Wistia ID Extractor Started');
+// Main handler function - use module.exports for Vercel
+module.exports = async function handler(req, res) {
+  console.log('Web Unlocker Proxy Handler Started');
   
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -91,49 +103,65 @@ export default async function handler(req, res) {
   try {
     const { url, email, password } = req.body;
 
-    if (!url) {
-      return res.status(400).json({ error: 'URL is required' });
+    if (!url || !email || !password) {
+      return res.status(400).json({ error: 'Missing required parameters: url, email, password' });
     }
 
-    console.log('Processing URL:', url);
+    console.log('Starting extraction process for URL:', url);
 
-    // First, try to extract Wistia ID directly from the URL
-    const directId = extractWistiaIdFromUrl(url);
+    // For now, let's try to fetch the target page directly
+    // Web Unlocker proxy should handle some authentication automatically
+    console.log('Fetching target page via Web Unlocker proxy...');
     
-    if (directId) {
-      console.log('Found Wistia ID in URL:', directId);
-      return res.status(200).json({ 
-        success: true, 
-        wistiaId: directId,
-        message: `Wistia ID found: ${directId}`,
-        source: 'url'
+    let targetResponse;
+    try {
+      targetResponse = await fetchWithWebUnlocker(url);
+    } catch (error) {
+      console.error('Error fetching page:', error);
+      return res.status(500).json({ 
+        error: 'Failed to fetch page via Web Unlocker', 
+        message: error.message,
+        success: false
       });
     }
 
-    // If it's a Wistia embed URL, we can't fetch it due to CORS
-    // but we already tried to extract the ID from the URL itself
-    if (url.includes('wistia.com') || url.includes('wistia.net')) {
+    console.log('Successfully fetched page, searching for Wistia ID...');
+
+    // Extract Wistia ID from the page content
+    const wistiaId = extractWistiaId(targetResponse.body);
+
+    if (wistiaId) {
+      console.log('Found Wistia ID:', wistiaId);
+      return res.status(200).json({ 
+        success: true, 
+        wistiaId: wistiaId,
+        message: `Wistia ID found: ${wistiaId}`
+      });
+    } else {
+      console.log('No Wistia ID found in page content');
+      
+      // Check if login is required
+      if (targetResponse.body.includes('Sign in') || targetResponse.body.includes('login')) {
+        return res.status(200).json({ 
+          success: false, 
+          message: 'Page requires login. Manual login flow needed for protected content.',
+          wistiaId: null
+        });
+      }
+      
       return res.status(200).json({ 
         success: false, 
-        message: 'Could not extract Wistia ID from this URL. For Kajabi pages, you may need to use the Python script locally.',
+        message: 'NO VIDEO - No Wistia ID found on the page',
         wistiaId: null
       });
     }
 
-    // For non-Wistia URLs (like Kajabi), we need authentication
-    // which requires the proxy setup we were trying to implement
-    return res.status(200).json({ 
-      success: false, 
-      message: 'This URL requires authentication. Please use the Python script for password-protected pages, or try a direct Wistia embed URL.',
-      wistiaId: null
-    });
-
   } catch (error) {
-    console.error('Error:', error);
+    console.error('Error during extraction:', error);
     return res.status(500).json({ 
       error: 'Internal server error', 
       message: error.message,
       success: false
     });
   }
-}
+};
