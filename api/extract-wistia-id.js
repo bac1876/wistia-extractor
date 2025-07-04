@@ -7,6 +7,7 @@ async function fetchWithWebUnlocker(targetUrl) {
     
     // Construct the URL exactly as shown in the curl example
     const apiUrl = `https://api.brightdata.com/request?key=${apiKey}&url=${encodeURIComponent(targetUrl)}&format=raw`;
+    console.log('Full API URL:', apiUrl);
     
     console.log('Making Web Unlocker API request to:', targetUrl);
 
@@ -87,6 +88,11 @@ function extractWistiaId(html) {
 
 // Main handler function
 export default async function handler(req, res) {
+  console.log('Environment variables:', { 
+    hasApiKey: !!process.env.BRIGHT_DATA_API_KEY,
+    apiKeyLength: process.env.BRIGHT_DATA_API_KEY ? process.env.BRIGHT_DATA_API_KEY.length : 0
+  });
+  
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -103,7 +109,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { url, email, password } = req.body; 
+    const { url, email, password } = req.body;
 
     if (!url || !email || !password) {
       return res.status(400).json({ error: 'Missing required parameters: url, email, password' });
