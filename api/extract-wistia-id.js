@@ -1,38 +1,28 @@
-const https = require('https');
+const axios = require('axios');
+const HttpsProxyAgent = require('https-proxy-agent');
 
-// Helper function to make requests via Web Unlocker API
+// Helper function to make requests via Web Unlocker Proxy
 async function fetchWithWebUnlocker(targetUrl) {
-  return new Promise((resolve, reject) => {
-    const apiKey = process.env.BRIGHT_DATA_API_KEY || '7ed816c201449cfea700fa9d279b7c138...'; // Your API key
+  // Web Unlocker proxy configuration
+  const proxy = 'http://brd-customer-hl_b332c2c3-zone-web_unlocker1:jcp31umu6sd4@brd.superproxy.io:33335';
+  
+  try {
+    console.log('Making request via Web Unlocker proxy to:', targetUrl);
     
-    // Construct the URL exactly as shown in the curl example
-    const apiUrl = `https://api.brightdata.com/request?key=${apiKey}&url=${encodeURIComponent(targetUrl)}&format=raw`;
-    console.log('Full API URL:', apiUrl);
-    
-    console.log('Making Web Unlocker API request to:', targetUrl);
-
-    https.get(apiUrl, (res) => {
-      let data = '';
-      
-      res.on('data', (chunk) => {
-        data += chunk;
-      });
-      
-      res.on('end', () => {
-        if (res.statusCode === 200) {
-          resolve({
-            statusCode: 200,
-            body: data
-          });
-        } else {
-          reject(new Error(`API request failed with status ${res.statusCode}: ${data}`));
-        }
-      });
-    }).on('error', (error) => {
-      console.error('Web Unlocker API error:', error);
-      reject(error);
+    const response = await axios.get(targetUrl, {
+      httpsAgent: new HttpsProxyAgent(proxy),
+      proxy: false, // Important: disable axios default proxy handling
+      timeout: 30000
     });
-  });
+    
+    return {
+      statusCode: response.status,
+      body: response.data
+    };
+  } catch (error) {
+    console.error('Web Unlocker proxy error:', error.message);
+    throw error;
+  }
 }
 
 // Function to extract Wistia ID from HTML
@@ -88,10 +78,7 @@ function extractWistiaId(html) {
 
 // Main handler function
 export default async function handler(req, res) {
-  console.log('Environment variables:', { 
-    hasApiKey: !!process.env.BRIGHT_DATA_API_KEY,
-    apiKeyLength: process.env.BRIGHT_DATA_API_KEY ? process.env.BRIGHT_DATA_API_KEY.length : 0
-  });
+  console.log('Web Unlocker Proxy Handler Started');
   
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -118,8 +105,8 @@ export default async function handler(req, res) {
     console.log('Starting extraction process for URL:', url);
 
     // For now, let's try to fetch the target page directly
-    // Web Unlocker should handle some authentication automatically
-    console.log('Fetching target page via Web Unlocker API...');
+    // Web Unlocker proxy should handle some authentication automatically
+    console.log('Fetching target page via Web Unlocker proxy...');
     
     let targetResponse;
     try {
